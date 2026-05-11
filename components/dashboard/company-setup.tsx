@@ -9,11 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Building2 } from 'lucide-react'
 
-interface CompanySetupProps {
-  userId: string
-}
-
-export function CompanySetup({ userId }: CompanySetupProps) {
+export function CompanySetup() {
   const [companyName, setCompanyName] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,13 +23,13 @@ export function CompanySetup({ userId }: CompanySetupProps) {
     const supabase = createClient()
 
     try {
-      const { error } = await supabase.from('companies').insert({
-        name: companyName,
-        user_id: userId,
+      const { data: companyId, error } = await supabase.rpc('create_company_with_owner', {
+        company_name: companyName,
       })
 
       if (error) throw error
 
+      router.push(`/dashboard?company=${companyId}`)
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create company')

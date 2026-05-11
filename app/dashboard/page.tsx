@@ -1,27 +1,67 @@
 import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
 import { StatsCards } from '@/components/dashboard/stats-cards'
 import { RevenueChart } from '@/components/dashboard/revenue-chart'
 import { RecentTransactions } from '@/components/dashboard/recent-transactions'
 import { ExpensesByCategory } from '@/components/dashboard/expenses-by-category'
 import { AddTransactionDialog } from '@/components/dashboard/add-transaction-dialog'
-import { CompanySetup } from '@/components/dashboard/company-setup'
+import { CompanySwitcher } from '@/components/dashboard/company-switcher'
+import { CreateCompanyDialog } from '@/components/dashboard/create-company-dialog'
 
-export default async function DashboardPage() {
+interface DashboardPageProps {
+  searchParams?: Promise<{
+    company?: string
+  }>
+}
+
+interface Company {
+  id: string
+  name: string
+}
+
+interface CompanyMemberRow {
+  role: 'owner' | 'admin' | 'member'
+  companies: Company | Company[] | null
+}
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  const params = await searchParams
+  const selectedCompanyId = params?.company
 
-  // Get user's company
-  const { data: companies } = await supabase
-    .from('companies')
-    .select('*')
+  if (!selectedCompanyId) {
+    redirect('/dashboard/companies')
+  }
+
+  // Get companies the user belongs to through the many-to-many membership table.
+  const { data: companyMemberships } = await supabase
+    .from('company_members')
+    .select('role, companies(id, name)')
     .eq('user_id', user!.id)
-    .limit(1)
 
-  const company = companies?.[0]
+  const memberships = ((companyMemberships || []) as CompanyMemberRow[])
+    .map((membership) => ({
+      ...membership,
+      companies: Array.isArray(membership.companies)
+        ? membership.companies[0]
+        : membership.companies,
+    }))
+    .filter((membership): membership is CompanyMemberRow & { companies: Company } =>
+      Boolean(membership.companies),
+    )
 
-  // If no company, show setup
+  const companies = memberships.map((membership) => membership.companies)
+  const canCreateCompany =
+    memberships.length === 0 ||
+    memberships.some((membership) =>
+      membership.role === 'owner' || membership.role === 'admin',
+    )
+
+  const company = companies.find((item) => item.id === selectedCompanyId)
+
   if (!company) {
-    return <CompanySetup userId={user!.id} />
+    redirect('/dashboard/companies')
   }
 
   // Get transactions
@@ -61,12 +101,16 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{company.name}</h1>
           <p className="text-muted-foreground">Financial overview and insights</p>
         </div>
-        <AddTransactionDialog companyId={company.id} userId={user!.id} />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <CompanySwitcher companies={companies} activeCompanyId={company.id} />
+          {canCreateCompany && <CreateCompanyDialog />}
+          <AddTransactionDialog companyId={company.id} userId={user!.id} />
+        </div>
       </div>
 
       <StatsCards
